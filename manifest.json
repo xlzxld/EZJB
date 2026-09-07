@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "Chrome Exhentai Help",
+  "$schema": "https://json.schemastore.org/chrome-manifest.json",
+  "version": "1.0.1",
+  "description": "exhentai 批量下载和自动分页插件",
+  "icons": {
+    "16": "icons/icon_16.png",
+    "32": "icons/icon_32.png",
+    "48": "icons/icon_48.png",
+    "128": "icons/icon_128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "ExHentai Help"
+  },
+  "permissions": [
+    "downloads",
+    "storage"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/icon_128.png"
+      ],
+      "matches": [
+        "https://*.exhentai.org/*",
+        "https://*.e-hentai.org/*"
+      ]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.exhentai.org/*",
+        "https://*.e-hentai.org/*"
+      ],
+      "run_at": "document_idle",
+      "js": [
+        "contentScript.js"
+      ],
+      "css": [
+        "styles.css"
+      ]
+    }
+  ]
+}
