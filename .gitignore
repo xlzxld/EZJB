@@ -4,3 +4,6 @@
 # WorkBuddy / zcode 工作区数据（含项目笔记，不进版本库）
 .workbuddy/
 .zcode/
+
+# 历史快照：已由 Git 历史与 tag 接管，无需再留目录
+.backup/
