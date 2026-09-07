@@ -1,0 +1,6 @@
+# macOS 访达生成的垃圾文件
+.DS_Store
+
+# WorkBuddy / zcode 工作区数据（含项目笔记，不进版本库）
+.workbuddy/
+.zcode/
