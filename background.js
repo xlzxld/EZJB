@@ -166,25 +166,38 @@
 
     function pruneInFlight() {
         const now = Date.now();
+        // 第一趟必须单独清过期：若把「超上限」并进同一个循环，size 会随删除递减，
+        // 循环会先删够「新记录」把 size 压到上限就停手，真正过期的记录反而被留下
+        // —— 结果是在窗口内的在途下载失去去重保护（正是本模块要防的并发同路径）。
         for (const [k, v] of inFlight.entries()) {
-            if (now - v.ts >= DEDUP_WINDOW || inFlight.size > INFLIGHT_MAX) {
+            if (now - v.ts >= DEDUP_WINDOW) inFlight.delete(k);
+        }
+        // 第二趟：仍超上限时按插入顺序（Map 保序）逐出最旧的，直到回到上限
+        if (inFlight.size > INFLIGHT_MAX) {
+            for (const k of inFlight.keys()) {
+                if (inFlight.size <= INFLIGHT_MAX) break;
                 inFlight.delete(k);
             }
         }
     }
 
     function dropDownload(id, done) {
+        // 无论哪一步失败都必须走到 done()，否则调用方的 Promise 永远不 resolve
+        const warn = (where, e) => console.warn(
+            `[ExHentai Help] 撤销陈旧下载失败（${where}, id=${id}）:`,
+            (e && e.message) || (e && e.error) || String(e)
+        );
         try {
             chrome.downloads.cancel(id, () => {
-                const _ = chrome.runtime.lastError;
+                if (chrome.runtime.lastError) warn("cancel", chrome.runtime.lastError);
                 try {
                     chrome.downloads.erase({ id }, () => {
-                        const __ = chrome.runtime.lastError;
+                        if (chrome.runtime.lastError) warn("erase", chrome.runtime.lastError);
                         done();
                     });
-                } catch (e) { done(); }
+                } catch (e) { warn("erase", e); done(); }
             });
-        } catch (e) { done(); }
+        } catch (e) { warn("cancel", e); done(); }
     }
 
     function dispatchDownload(key, url, relPath) {
@@ -221,8 +234,12 @@
     }
 
     /* ===== 消息处理 ===== */
-    // sendResponse 在端口已关闭时会抛错，统一兜底，避免异常冒泡到 onMessage
-    const reply = (sendResponse, obj) => { try { sendResponse(obj); } catch (e) {} };
+    // sendResponse 在端口已关闭（页面跳转 / 标签页被关）时会抛错，属于预期情形：
+    // 不重试、不改变返回值，只把原因写进控制台，便于排查「content 收不到响应」。
+    const reply = (sendResponse, obj) => {
+        try { sendResponse(obj); }
+        catch (e) { console.warn("[ExHentai Help] 响应发送失败（端口可能已关闭）:", (e && e.message) || String(e)); }
+    };
     // 消息体可能来自被篡改的页面，payload 一律做类型收敛
     const payloadOf = (msg) => (msg && msg.payload && typeof msg.payload === "object") ? msg.payload : {};
 
