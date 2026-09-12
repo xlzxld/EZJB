@@ -40,7 +40,34 @@
             pageOf: "已显示第 ${cur} / ${tot} 页 · 滚动加载更多",
             pageAll: "已显示全部 ${tot} 页",
             loadingPage: "正在加载第 ${cur} / ${tot} 页...",
-            openGalleryFail: "画廊打开失败：${err}", pageCollectFail: "第 ${n} 页收集失败：${err}"
+            openGalleryFail: "画廊打开失败：${err}", pageCollectFail: "第 ${n} 页收集失败：${err}",
+            /* ---- 以下为原先硬编码在逻辑里的用户可见文案（补齐 en 侧，避免英文界面夹中文） ---- */
+            logAbove: "见上方日志",
+            pageGapWarn: "[!] 注意：第 ${pages} 页缩略图收集失败，部分图片未加入下载列表",
+            pageGapName: "${name}（缩略图缺失）",
+            pageGapError: "第 ${pages} 页缩略图收集失败",
+            skipHint: "取消勾选将完整重新下载，同名文件直接覆盖",
+            reportTitle: "ExHentai 下载失败报告",
+            reportTime: "生成时间: ${time}",
+            reportTotal: "共 ${n} 项",
+            noImageUrl: "无法解析图片地址",
+            badImageUrl: "非法的图片页地址",
+            quotaExceeded: "配额超限 (509 Bandwidth Limit Exceeded)",
+            noGalleryBase: "缺少画廊地址",
+            noTorrentLink: "未找到种子链接",
+            downloadFailed: "下载失败",
+            downloadTimeout: "下载超时",
+            downloadInterrupted: "下载中断",
+            taskAborted: "任务已中止",
+            extNotRunning: "插件未运行，请刷新页面",
+            msgTimeout: "消息超时",
+            msgFailed: "消息失败",
+            noResponse: "无响应",
+            dispatchFailed: "下载派发失败",
+            dispatchNoId: "下载派发异常：缺少 downloadId",
+            missingUrl: "缺少 URL",
+            requestFailed: "请求失败",
+            unknownError: "未知错误"
         },
         en: {
             appName: "ExHentai Helper",
@@ -77,7 +104,33 @@
             pageOf: "Showing page ${cur} / ${tot} · scroll for more",
             pageAll: "All ${tot} pages shown",
             loadingPage: "Loading page ${cur} / ${tot}...",
-            openGalleryFail: "Failed to open gallery: ${err}", pageCollectFail: "Page ${n} collect failed: ${err}"
+            openGalleryFail: "Failed to open gallery: ${err}", pageCollectFail: "Page ${n} collect failed: ${err}",
+            logAbove: "see log above",
+            pageGapWarn: "[!] Warning: thumbnail pages ${pages} failed to load, some images are not in the queue",
+            pageGapName: "${name} (thumbnail pages missing)",
+            pageGapError: "thumbnail pages ${pages} failed to load",
+            skipHint: "Uncheck to re-download everything; same-named files are overwritten",
+            reportTitle: "ExHentai download failure report",
+            reportTime: "Generated: ${time}",
+            reportTotal: "${n} item(s) in total",
+            noImageUrl: "Cannot resolve the image URL",
+            badImageUrl: "Invalid image page URL",
+            quotaExceeded: "Quota exceeded (509 Bandwidth Limit Exceeded)",
+            noGalleryBase: "Missing gallery URL",
+            noTorrentLink: "No torrent link found",
+            downloadFailed: "Download failed",
+            downloadTimeout: "Download timed out",
+            downloadInterrupted: "Download interrupted",
+            taskAborted: "Task aborted",
+            extNotRunning: "Extension is not running, please reload the page",
+            msgTimeout: "Message timed out",
+            msgFailed: "Message failed",
+            noResponse: "No response",
+            dispatchFailed: "Failed to dispatch the download",
+            dispatchNoId: "Download dispatch error: missing downloadId",
+            missingUrl: "Missing URL",
+            requestFailed: "Request failed",
+            unknownError: "Unknown error"
         }
     };
     const i18n = {
@@ -98,8 +151,9 @@
      * =================================================================== */
     // 异常对象不可信（可能是字符串 / null / Error），统一提取可读文本
     const errText = (e) => {
-        if (e === null || e === undefined) return "未知错误";
-        if (typeof e === "string") return e || "未知错误";
+        const fallback = i18n.t("unknownError");
+        if (e === null || e === undefined) return fallback;
+        if (typeof e === "string") return e || fallback;
         const m = e.message || e.error;
         return (typeof m === "string" && m) ? m : String(e);
     };
@@ -213,6 +267,9 @@
     /* =====================================================================
      * DOM / 网络工具
      * =================================================================== */
+    // 单次页面抓取超时（ms）。原先只作为 fetchPageContent 的形参默认值存在，
+    // 调用方从不传参 → 实际取值被埋在表达式里，这里提到显式常量。
+    const FETCH_TIMEOUT_MS = 30000;
     const Dom = {
         sleep: (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms || 0))),
         jitter: () => Math.floor(Math.random() * 400),
@@ -227,7 +284,7 @@
         async fetchPageContent(url, timeoutMs) {
             if (!url) return document;
             const ctrl = typeof AbortController === "function" ? new AbortController() : null;
-            const timer = setTimeout(() => { if (ctrl) ctrl.abort(); }, timeoutMs || 30000);
+            const timer = setTimeout(() => { if (ctrl) ctrl.abort(); }, clampInt(timeoutMs, 1000, 120000, FETCH_TIMEOUT_MS));
             try {
                 const res = await fetch(url, Object.assign({ credentials: "include" }, ctrl ? { signal: ctrl.signal } : null));
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -247,7 +304,10 @@
             document.body.appendChild(a);
             a.click();
             a.remove();
-            if (isBlob) setTimeout(() => { try { URL.revokeObjectURL(href); } catch (e) {} }, 4000);
+            if (isBlob) setTimeout(() => {
+                try { URL.revokeObjectURL(href); }
+                catch (e) { console.warn("[ExHentai Help] 释放 blob URL 失败:", errText(e)); }
+            }, 4000);
         },
         // IndexedDB 操作（has / put / clear）
         async useDatabase(payload) {
@@ -261,24 +321,24 @@
      * =================================================================== */
     function sendMsg(type, payload, timeout) {
         return new Promise((resolve) => {
-            if (!chrome.runtime || !chrome.runtime.id) return resolve({ success: false, error: "插件未运行，请刷新页面" });
+            if (!chrome.runtime || !chrome.runtime.id) return resolve({ success: false, error: i18n.t("extNotRunning") });
             let done = false;
             let timer = 0;
             const finish = (v) => { if (done) return; done = true; clearTimeout(timer); resolve(v); };
-            timer = setTimeout(() => finish({ success: false, error: "消息超时" }), clampInt(timeout, 1000, 120000, 15000));
+            timer = setTimeout(() => finish({ success: false, error: i18n.t("msgTimeout") }), clampInt(timeout, 1000, 120000, 15000));
             const fire = (n) => {
                 const retryOr = (err) => {
                     if (done) return;
                     // 退避重试 3 次（300 / 700 / 1500ms）后仍失败才放弃
                     if (n < 3) setTimeout(() => fire(n + 1), [300, 700, 1500][n] || 1500);
-                    else finish({ success: false, error: errText(err) || "消息失败" });
+                    else finish({ success: false, error: errText(err) || i18n.t("msgFailed") });
                 };
                 try {
                     chrome.runtime.sendMessage({ type, payload }, (res) => {
                         if (done) return;
                         const le = chrome.runtime.lastError;
                         if (le) return retryOr(le.message);
-                        finish(res || { success: false, error: "无响应" });
+                        finish(res || { success: false, error: i18n.t("noResponse") });
                     });
                 } catch (e) { retryOr(e); }
             };
@@ -306,17 +366,17 @@
     }
 
     async function sendDownload({ url, filename, subpath }, ctrl) {
-        if (ctrl && ctrl.status === "aborted") return { success: false, error: "任务已中止" };
+        if (ctrl && ctrl.status === "aborted") return { success: false, error: i18n.t("taskAborted") };
         const res = await sendMsg("DOWNLOAD", { url, filename, subpath });
-        if (!res || !res.success) return res || { success: false, error: "下载派发失败" };
+        if (!res || !res.success) return res || { success: false, error: i18n.t("dispatchFailed") };
         const id = res.downloadId;
-        if (typeof id !== "number" || !isFinite(id)) return { success: false, error: "下载派发异常：缺少 downloadId" };
+        if (typeof id !== "number" || !isFinite(id)) return { success: false, error: i18n.t("dispatchNoId") };
         const start = Date.now();
         let queryErrors = 0;
         while (Date.now() - start < 180000) { // 3 分钟超时
-            if (ctrl && ctrl.status === "aborted") return { success: false, error: "任务已中止" };
+            if (ctrl && ctrl.status === "aborted") return { success: false, error: i18n.t("taskAborted") };
             await Dom.sleep(800);
-            if (ctrl && ctrl.status === "aborted") return { success: false, error: "任务已中止" };
+            if (ctrl && ctrl.status === "aborted") return { success: false, error: i18n.t("taskAborted") };
             const st = await sendMsg("DOWNLOAD_QUERY", { id }, 8000);
             if (st && st.state) {
                 queryErrors = 0;
@@ -325,13 +385,13 @@
                     const misplaced = checkLanded(st.filename, subpath);
                     return misplaced ? { success: true, misplaced } : { success: true };
                 }
-                if (st.state === "interrupted") return { success: false, error: st.error || "下载中断" };
+                if (st.state === "interrupted") return { success: false, error: st.error || i18n.t("downloadInterrupted") };
             } else if (++queryErrors >= 5) {
                 // 连续 5 次查不到状态（SW 始终不可用）→ 提前放弃，结果与原逻辑（等到 3 分钟超时）一致
-                return { success: false, error: "下载超时" };
+                return { success: false, error: i18n.t("downloadTimeout") };
             }
         }
-        return { success: false, error: "下载超时" };
+        return { success: false, error: i18n.t("downloadTimeout") };
     }
 
     function toast(msg, ms) {
@@ -383,10 +443,16 @@
                 const stored = await new Promise((resolve) => {
                     try {
                         chrome.storage.local.get("settings", (s) => resolve(s && s.settings));
-                    } catch (e) { resolve(null); }
+                    } catch (e) {
+                        // 扩展上下文失效时 chrome.storage 会同步抛错：回落默认值，但要说清原因
+                        console.warn("[ExHentai Help] 读取设置失败（扩展上下文可能已失效），本次使用默认值:", errText(e));
+                        resolve(null);
+                    }
                 });
                 this.cache = this.normalize(stored);
-            } catch (e) { /* 读取失败时保持默认值 */ }
+            } catch (e) {
+                console.warn("[ExHentai Help] 读取设置失败，本次使用默认值:", errText(e));
+            }
             return this.cache;
         },
         get(k) { return this.cache ? this.cache[k] : this.defaults[k]; },
@@ -396,9 +462,14 @@
             try {
                 await new Promise((resolve) => {
                     try { chrome.storage.local.set({ settings: this.cache }, resolve); }
-                    catch (e) { resolve(); }
+                    catch (e) {
+                        console.warn("[ExHentai Help] 保存设置失败（仅内存生效，刷新后丢失）:", errText(e));
+                        resolve();
+                    }
                 });
-            } catch (e) { /* 写入失败不影响内存中的设置 */ }
+            } catch (e) {
+                console.warn("[ExHentai Help] 保存设置失败（仅内存生效，刷新后丢失）:", errText(e));
+            }
         }
     };
 
@@ -426,14 +497,16 @@
             return results;
         },
         async fetchWithRetry(url, timeoutMs) {
-            if (!url) throw new Error("缺少 URL");
+            if (!url) throw new Error(i18n.t("missingUrl"));
             const retry = clampInt(Settings.get("retryCount"), 0, 10, 3);
+            // retryDelay 若被脏数据写成非数字会得到 NaN → 退避变成 0ms 空转，这里收敛一次
+            const delay = clampInt(Settings.get("retryDelay"), 0, 60000, Settings.defaults.retryDelay);
             let lastErr;
             for (let i = 0; i <= retry; i++) {
-                try { return await Dom.fetchPageContent(url, timeoutMs); }
-                catch (e) { lastErr = e; if (i < retry) await Dom.sleep(Settings.get("retryDelay") * (i + 1) + Dom.jitter()); }
+                try { return await Dom.fetchPageContent(url, timeoutMs || FETCH_TIMEOUT_MS); }
+                catch (e) { lastErr = e; if (i < retry) await Dom.sleep(delay * (i + 1) + Dom.jitter()); }
             }
-            throw lastErr || new Error("请求失败");
+            throw lastErr || new Error(i18n.t("requestFailed"));
         }
     };
 
@@ -565,7 +638,11 @@
             this.popup = null; // 先摘引用，onClose 里若再触发 close 也不会递归
             if (this._unbindDrag) { this._unbindDrag(); this._unbindDrag = null; }
             popup.aborted = true;
-            if (popup.onClose) { try { popup.onClose(); } catch (e) {} }
+            // onClose 由调用方提供，抛错不能阻断关闭流程本身的收尾
+            if (popup.onClose) {
+                try { popup.onClose(); }
+                catch (e) { console.warn("[ExHentai Help] 弹窗关闭回调抛错:", errText(e)); }
+            }
             if (popup.overlay && popup.overlay.parentNode) popup.overlay.parentNode.removeChild(popup.overlay);
         }
     };
@@ -842,7 +919,9 @@
                     const npage = nnext ? pageNoOf(nnext, NaN) : NaN;
                     st.cur = cpage;
                     st.next = nnext && !isNaN(npage) && npage > cpage ? nnext : null;
-                    try { this._appendImagePage(doc, url); } catch (e) {}
+                    // 追加失败不能影响翻页状态机，但必须留下可排查的上下文
+                    try { this._appendImagePage(doc, url); }
+                    catch (e) { console.warn("[ExHentai Help] 追加大图页失败:", errText(e), url); }
                     if (!this.previewStyleInserted) { const s = document.createElement("style"); s.textContent = "#i3 > div {color:#222;}"; document.head.appendChild(s); this.previewStyleInserted = true; }
                     this.status = st.next ? "pending" : "non";
                     if (msg) msg.textContent = st.next ? i18n.t("pageOf", { cur: st.cur, tot: st.tot || "?" }) : i18n.t("pageAll", { tot: st.tot || st.cur });
@@ -964,7 +1043,7 @@
             try {
                 const r = await tryOnce();
                 if (r === true) return true;
-                lastErr = r || "下载失败";
+                lastErr = r || i18n.t("downloadFailed");
             } catch (e) { lastErr = errText(e); }
             // 中止后立刻退出，否则「已中止」还会继续重试并发起下载
             if (ctrl.status === "aborted") return false;
@@ -1011,7 +1090,12 @@
     function buildFailureReport(failed) {
         const list = Array.isArray(failed) ? failed : [];
         const lines = list.map((f) => `${f.name}\t${f.url}\t${f.error}`);
-        return `ExHentai 下载失败报告\n生成时间: ${new Date().toLocaleString()}\n共 ${list.length} 项\n\n` + lines.join("\n");
+        const head = [
+            i18n.t("reportTitle"),
+            i18n.t("reportTime", { time: new Date().toLocaleString() }),
+            i18n.t("reportTotal", { n: list.length })
+        ].join("\n");
+        return head + "\n\n" + lines.join("\n");
     }
 
     // 失败报告（复制/导出/重试）：整块渲染在日志末尾。
@@ -1052,7 +1136,11 @@
         wrap.appendChild(actions);
         // 重试按钮作为报告块的一部分，固定在复制/导出下方（即报告底部）
         if (typeof onRetry === "function") {
-            const rb = Dom.el("button", "eh-btn eh-dl-abort eh-report-retry", `${i18n.t("retryAllFailed")} (${list.length})`);
+            // 结构性失败（整页缩略图丢失、残留的目录不可用条目）重试单张必然失败，
+            // 不能计入按钮条数，否则「重试全部失败项 (N)」里有几项注定原地打转
+            const nRetry = list.filter((f) => f.retryable !== false).length;
+            const rb = Dom.el("button", "eh-btn eh-dl-abort eh-report-retry", `${i18n.t("retryAllFailed")} (${nRetry})`);
+            rb.disabled = nRetry === 0;
             rb.onclick = () => onRetry();
             wrap.appendChild(rb);
         }
@@ -1067,12 +1155,18 @@
             // 先摘掉整块报告：重试期间产生的新日志都排在它后面，结束后再整体重绘到末尾
             const old = modal.body ? modal.body.querySelector(".eh-report") : null;
             if (old) old.remove();
-            modal.appendContent(`<b style="color:var(--eh-accent)">${i18n.t("retrying")} ${list.length} ${i18n.t("failureReport")}</b>`);
-            for (const f of [...list]) {
+            const todo = list.filter((f) => f.retryable !== false);
+            if (!todo.length) return; // 只剩结构性失败，重试单张没有意义
+            // 重试同样先探测一次目标目录：否则目录仍不可用时，一次「重试全部」
+            // 会把整批文件全撒进默认下载目录 —— 正是目录闸门要防的事
+            resetDirGate();
+            modal.appendContent(`<b style="color:var(--eh-accent)">${i18n.t("retrying")} ${todo.length} ${i18n.t("failureReport")}</b>`);
+            for (const f of todo) {
                 if (ctrl.status === "aborted") break;
                 let ok = false;
                 try { ok = await retryOne(f); } catch (e) { ok = false; }
-                if (ok) { const i = list.indexOf(f); if (i >= 0) list.splice(i, 1); }
+                // 必须严格判 true：retryOne 还可能返回 DIR_SKIP（目录不可用）等真值对象
+                if (ok === true) { const i = list.indexOf(f); if (i >= 0) list.splice(i, 1); }
             }
             if (list.length === 0) modal.appendContent(`<b class="eh-log-ok">${i18n.t("retryAllOk")}</b>`);
             else {
@@ -1108,7 +1202,7 @@
         return withRetry(ctrl, modal, seq, async () => {
             let id;
             try { id = new URL(link).pathname.replace("/s/", "").replace(/\//g, "-"); }
-            catch (e) { throw new Error("非法的图片页地址"); }
+            catch (e) { throw new Error(`${i18n.t("badImageUrl")}: ${errText(e)}`); }
             if (o.skipDownloaded && await Dom.useDatabase({ store: "image", action: "has", data: id })) {
                 modal.appendContent(logLine("eh-log-skip", i18n.t("skipRecord", { name: seq })));
                 return true;
@@ -1117,9 +1211,9 @@
             const rawTitle = ((Array.from(page.querySelectorAll("#i2 > div")).pop()?.textContent || "Image").split("::")[0]).trim() || "Image";
             const title = Dom.sanitizePath(rawTitle.replace(/\.(jpe?g|png|webp|gif|bmp|avif|jfif|tiff?)$/i, "")) || "Image";
             const imgUrl = page.querySelector("#img")?.src;
-            if (!imgUrl) throw new Error("无法解析图片地址");
+            if (!imgUrl) throw new Error(i18n.t("noImageUrl"));
             if (/509\.gif/i.test(imgUrl) || /509\s+bandwidth\s+limit/i.test(page.body?.textContent || "")) {
-                throw new Error("配额超限 (509 Bandwidth Limit Exceeded)");
+                throw new Error(i18n.t("quotaExceeded"));
             }
             const ext = safeExt(imgUrl);
             const filename = fitFileName(o.keepOriginalName ? `${seq}_${title}` : seq, ext, seq);
@@ -1131,7 +1225,7 @@
                 if (o.skipDownloaded) await Dom.useDatabase({ store: "image", action: "put", data: { id, name: filename, link } });
                 return true;
             }
-            return (res && res.error) || "下载失败";
+            return (res && res.error) || i18n.t("downloadFailed");
         });
     }
 
@@ -1202,7 +1296,7 @@
     }
 
     async function runImageDownload(galleryBase, opts, existingModal, sharedFailed) {
-        if (!galleryBase) throw new Error("缺少画廊地址");
+        if (!galleryBase) throw new Error(i18n.t("noGalleryBase"));
         const modal0 = existingModal || null;
         let firstDoc;
         try {
@@ -1235,14 +1329,19 @@
         };
 
         if (links.failedPages && links.failedPages.length) {
-            modal.appendContent(logLine("eh-log-warn", `[!] 注意：第 ${links.failedPages.join(", ")} 页缩略图收集失败，部分图片未加入下载列表`));
+            const pages = links.failedPages.join(", ");
+            modal.appendContent(logLine("eh-log-warn", i18n.t("pageGapWarn", { pages })));
+            // 这一条是「整页缩略图没抓到」的结构性缺失：它没有单张图片地址，
+            // 重试时只会拿画廊地址当图片页抓 → 必然失败。标记为不可重试，
+            // 但仍留在报告里，避免「失败 0」把丢页说成全部成功。
             failed.push({
-                name: `${galleryName} (缩略图缺失)`,
+                name: i18n.t("pageGapName", { name: galleryName }),
                 url: galleryBase,
                 index: 0,
                 padLen,
                 subpath,
-                error: `第 ${links.failedPages.join(", ")} 页缩略图收集失败`
+                retryable: false,
+                error: i18n.t("pageGapError", { pages })
             });
         }
 
@@ -1256,10 +1355,16 @@
                 if (ctrl.status !== "aborted") failed.push({ name: itemLabel(t.index), url: t.link, index: t.index, padLen, subpath, error: i18n.t("dirUnusableShort") });
                 return;
             }
-            if (!r && ctrl.status !== "aborted") failed.push({ name: itemLabel(t.index), url: t.link, index: t.index, padLen, subpath, error: "见上方日志" });
+            if (!r && ctrl.status !== "aborted") failed.push({ name: itemLabel(t.index), url: t.link, index: t.index, padLen, subpath, error: i18n.t("logAbove") });
         });
 
-        finishDownload(modal, ctrl, failed, sharedFailed, (f) => downloadSingleImage(f.url, f.index, f.padLen, opts, ctrl, modal, f.subpath));
+        // 重试同样过目录闸门：目录仍不可用时只探测 1 张就刹车，
+        // 不会因为一次「重试全部」把整批文件撒进默认下载目录
+        finishDownload(modal, ctrl, failed, sharedFailed, (f) => withDirGate(
+            f.subpath || subpath,
+            () => downloadSingleImage(f.url, f.index, f.padLen, opts, ctrl, modal, f.subpath),
+            onDirPoison
+        ));
     }
 
     /* =====================================================================
@@ -1301,13 +1406,14 @@
         const failed = [];
 
         const downloadOne = (item, idx) => withRetry(ctrl, modal, item.name, async () => {
-            const doc = await Speed.fetchWithRetry(item.torrentPageUrl);
-            const tor = extractLatestTorrent(doc, item.torrentPageUrl);
-            if (!tor.torrentUrl) throw new Error("no torrent");
+            // 跳过判定先于抓取（与图片流程一致）：已下载过的条目不必再请求种子页
             if (opts.skipDownloaded && await Dom.useDatabase({ store: "torrent", action: "has", data: item.id })) {
                 modal.appendContent(logLine("eh-log-skip", i18n.t("skipShort", { name: item.name })));
                 return true;
             }
+            const doc = await Speed.fetchWithRetry(item.torrentPageUrl);
+            const tor = extractLatestTorrent(doc, item.torrentPageUrl);
+            if (!tor.torrentUrl) throw new Error(i18n.t("noTorrentLink"));
             const seq = String(idx + 1).padStart(padLen, "0");
             const nm = String(tor.fileName || "").replace(/\.torrent$/i, "");
             const filename = fitFileName(opts.keepOriginalName ? `${seq}_${nm}` : seq, "torrent", seq);
@@ -1319,7 +1425,7 @@
                 if (opts.skipDownloaded) await Dom.useDatabase({ store: "torrent", action: "put", data: { id: item.id, name: item.name } });
                 return true;
             }
-            return (res && res.error) || "下载失败";
+            return (res && res.error) || i18n.t("downloadFailed");
         });
 
         await Speed.runWithConcurrency(list.map((it, i) => ({ it, i })), Settings.get("concurrency"), async ({ it, i }) => {
@@ -1328,12 +1434,14 @@
                 if (ctrl.status !== "aborted") failed.push({ name: it.name, url: it.torrentPageUrl, error: i18n.t("dirUnusableShort") });
                 return;
             }
-            if (!r && ctrl.status !== "aborted") failed.push({ name: it.name, url: it.torrentPageUrl, error: "见上方日志" });
+            if (!r && ctrl.status !== "aborted") failed.push({ name: it.name, url: it.torrentPageUrl, error: i18n.t("logAbove") });
         });
 
+        // 重试同样过目录闸门（与图片流程一致），避免一次「重试全部」把整批文件撒出去
         finishDownload(modal, ctrl, failed, null, (f) => {
             const i = list.findIndex((x) => x.torrentPageUrl === f.url);
-            return i >= 0 ? downloadOne(list[i], i) : false;
+            if (i < 0) return false;
+            return withDirGate(subpath, () => downloadOne(list[i], i), onDirPoison);
         });
     }
 
@@ -1344,7 +1452,7 @@
         const wrap = Dom.el("div");
         wrap.innerHTML = `
             <div class="eh-field"><label class="eh-check"><input type="checkbox" id="cfg-keep" ${Settings.get("keepOriginalName") ? "checked" : ""}> ${i18n.t("keepName")}</label> <small style="color:var(--eh-text-soft)">${i18n.t("keepNameHint")}</small></div>
-            <div class="eh-field"><label class="eh-check"><input type="checkbox" id="cfg-skip" ${Settings.get("skipDownloaded") ? "checked" : ""}> ${i18n.t("skipDownloaded")}</label> <small style="color:var(--eh-text-soft)">取消勾选将完整重新下载，同名文件直接覆盖</small></div>
+            <div class="eh-field"><label class="eh-check"><input type="checkbox" id="cfg-skip" ${Settings.get("skipDownloaded") ? "checked" : ""}> ${i18n.t("skipDownloaded")}</label> <small style="color:var(--eh-text-soft)">${i18n.t("skipHint")}</small></div>
             <div class="eh-field"><span>${i18n.t("maxConcurrency")}</span><input class="eh-input" id="cfg-conc" type="number" min="1" max="8" value="${Settings.get("concurrency")}" style="width:60px"></div>
             <div class="eh-field"><span>${i18n.t("retryCount")}</span><input class="eh-input" id="cfg-retry" type="number" min="0" max="10" value="${Settings.get("retryCount")}" style="width:60px"></div>
             <div class="eh-field"><span>${i18n.t("downloadPath")}</span></div>
@@ -1396,10 +1504,15 @@
             Modal.close();
             if (typeof onStart !== "function") return;
             const keep = pick("#cfg-keep"), skip = pick("#cfg-skip");
-            onStart({
-                keepOriginalName: keep ? !!keep.checked : Settings.get("keepOriginalName"),
-                skipDownloaded: skip ? !!skip.checked : Settings.get("skipDownloaded")
-            });
+            // 统一兜底：各入口的下载流程都是异步的，漏掉 catch 会变成
+            // 「点了开始但什么都没发生」的未处理 rejection
+            try {
+                const ret = onStart({
+                    keepOriginalName: keep ? !!keep.checked : Settings.get("keepOriginalName"),
+                    skipDownloaded: skip ? !!skip.checked : Settings.get("skipDownloaded")
+                });
+                if (ret && typeof ret.catch === "function") ret.catch((e) => toast(errText(e)));
+            } catch (e) { toast(errText(e)); }
         };
     }
 
@@ -1508,6 +1621,13 @@
             document.querySelectorAll(".eh-g-selected").forEach((e) => e.classList.remove("eh-g-selected"));
             document.querySelectorAll(".eh-batch-bar, .eh-g-overlay").forEach((e) => e.remove());
             document.querySelectorAll("[data-eh-bound]").forEach((e) => e.removeAttribute("data-eh-bound"));
+            // 还原被提层的缩略图：否则关掉批量模式后，站点的图片会永久留着我们写进去的
+            // inline z-index / position（attach 是覆盖式写入，不还原就等于污染页面样式）
+            document.querySelectorAll(".eh-g-lifted").forEach((e) => {
+                e.classList.remove("eh-g-lifted");
+                e.style.zIndex = "";
+                e.style.position = "";
+            });
             this.ui = null;
         }
 
@@ -1653,8 +1773,13 @@
         modal.appendContent(`<b class="eh-log-fail">${i18n.t("donePartial", { n: sharedFailed.length })}</b>`);
         injectRetryAll(modal, sharedFailed, ctrl, (f) => {
             if (ctrl.status === "aborted") return false;
-            // 直接重试单张失败图片，不重跑整个画廊；subpath 带画廊名保证存到正确目录
-            return downloadSingleImage(f.url, f.index, f.padLen, opts, ctrl, modal, f.subpath);
+            // 直接重试单张失败图片，不重跑整个画廊；subpath 带画廊名保证存到正确目录。
+            // 仍过目录闸门：多个画廊各自探测一次，目录不可用就只多花 1 张
+            return withDirGate(
+                f.subpath,
+                () => downloadSingleImage(f.url, f.index, f.padLen, opts, ctrl, modal, f.subpath),
+                (p) => modal.appendContent(logLine("eh-log-warn", i18n.t("dirUnusable", { path: p })))
+            );
         });
     }
 
