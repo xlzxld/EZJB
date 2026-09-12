@@ -59,7 +59,8 @@
 
 #eh-popup {
   position: fixed;
-  min-width: 420px;
+  /* 窄窗口（分屏 / 移动端）下 420px 会撑出横向溢出：取两者较小值 */
+  min-width: min(420px, calc(100vw - 16px));
   max-width: 90vw;
   min-height: 120px;
   max-height: calc(100vh - 32px);
@@ -363,7 +364,7 @@
   box-shadow: var(--eh-glass-shadow);
   transition: transform 0.12s ease, background 0.18s ease;
 }
-.eh-glass-btn:hover { background: rgba(255,255,255,0.86); }
+.eh-glass-btn:hover { background: var(--eh-glass-bg-strong); filter: brightness(1.04); }
 .eh-glass-btn:active { transform: scale(0.96); }
 
 /* ---------- 批量选择：整块卡片即勾选区，缩略图除外 ----------
