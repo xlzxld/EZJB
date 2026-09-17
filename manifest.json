@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Chrome Exhentai Help",
   "$schema": "https://json.schemastore.org/chrome-manifest.json",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "exhentai 批量下载和自动分页插件",
   "icons": {
     "16": "icons/icon_16.png",
