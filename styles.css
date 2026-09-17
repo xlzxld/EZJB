@@ -268,6 +268,7 @@
   display: flex; align-items: center; justify-content: center;
   cursor: pointer;
   overflow: hidden;
+  user-select: none; -webkit-user-select: none; /* 双击不选中周围文字 */
   /* 展开态默认隐藏，收起时淡入放大 */
   opacity: 0;
   visibility: hidden;

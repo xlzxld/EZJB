@@ -7,6 +7,7 @@
     const I18N = {
         zh: {
             appName: "ExHentai 助手",
+            cpDockHint: "点击展开面板 · 双击回到页面顶部",
             batchOn: "批量下载", batchHint: "开：列表页点击条目即可勾选",
             infiniteOn: "无限滚动", infiniteHint: "开：列表/画廊/大图页自动加载下一页",
             batchBarTitle: "批量下载", selectAll: "全选", invertSel: "反选", clearSel: "清除",
@@ -71,6 +72,7 @@
         },
         en: {
             appName: "ExHentai Helper",
+            cpDockHint: "Click to expand · double-click to scroll to top",
             batchOn: "Batch", batchHint: "ON: click list items to select galleries",
             infiniteOn: "Infinite Scroll", infiniteHint: "ON: auto-load next page on list/gallery/image view",
             batchBarTitle: "Batch Download", selectAll: "All", invertSel: "Invert", clearSel: "Clear",
@@ -652,9 +654,29 @@
      * =================================================================== */
     // 鼠标移出面板后延迟多久自动最小化
     const CP_AUTO_MIN_MS = 2000;
+    // 双击判定窗口：单击先等这么久，期间若再来一次点击就判为双击（回到顶部）
+    const CP_DBLCLICK_MS = 250;
+
+    // 平滑置顶：优先 scrollTo({behavior:"smooth"})，环境不支持时退回直接赋值 scrollTop
+    function smoothToTop(el) {
+        if (!el) return;
+        if (typeof el.scrollTo === "function") {
+            try { el.scrollTo({ top: 0, left: 0, behavior: "smooth" }); return; }
+            catch (e) { console.warn("[ExHentai Help] 平滑置顶失败，改为直接置顶:", errText(e)); }
+        }
+        try { el.scrollTop = 0; }
+        catch (e2) { console.warn("[ExHentai Help] 置顶失败:", errText(e2)); }
+    }
+    // 回到页面顶部：列表页可能是内部容器滚动，容器与文档都要归零
+    function scrollPageToTop() {
+        const docEl = document.scrollingElement || document.documentElement;
+        const sc = AutoPager._scrollerEl();
+        smoothToTop(sc || docEl);
+        if (sc) smoothToTop(docEl); // 容器滚动时文档本身也可能带偏移
+    }
 
     const ControlPanel = new class {
-        constructor() { this.panel = null; this.dock = null; this._timer = 0; this._min = false; }
+        constructor() { this.panel = null; this.dock = null; this._timer = 0; this._min = false; this._clickTimer = 0; }
         init() {
             if (!document.body || document.getElementById("eh-control-panel")) return;
             const panel = Dom.el("div", "eh-glass"); panel.id = "eh-control-panel";
@@ -668,7 +690,7 @@
 
             // 最小化后停靠在右侧的图标：与面板右下角对齐，垂直位置不变
             const dock = Dom.el("div", "eh-glass"); dock.id = "eh-cp-dock";
-            dock.title = i18n.t("appName");
+            dock.title = i18n.t("cpDockHint");
             const img = document.createElement("img");
             img.alt = "";
             img.src = this._iconUrl();
@@ -687,8 +709,25 @@
             };
             panel.addEventListener("mouseenter", () => clearTimeout(this._timer));
             panel.addEventListener("mouseleave", schedule);
-            dock.addEventListener("mouseenter", () => this.setMin(false)); // 悬停图标立即展开
+            dock.addEventListener("mouseenter", () => clearTimeout(this._timer));
             dock.addEventListener("mouseleave", schedule);
+            // 单击展开、双击回到顶部：双击必然先派发一次 click，所以单击要延迟一个判定窗口再展开，
+            // 否则第一次点击就展开 → 图标立刻隐藏（pointer-events:none）→ 第二次点不到图标，双击永远触发不了
+            dock.addEventListener("click", () => {
+                if (this._clickTimer) { // 判定窗口内的第二次点击 = 双击
+                    clearTimeout(this._clickTimer);
+                    this._clickTimer = 0;
+                    this.setMin(false);
+                    scrollPageToTop();
+                    schedule();
+                    return;
+                }
+                this._clickTimer = setTimeout(() => {
+                    this._clickTimer = 0;
+                    this.setMin(false);
+                    schedule(); // 展开后重新计时：鼠标没停在面板上就 2 秒后自动收起
+                }, CP_DBLCLICK_MS);
+            });
             this.setMin(false);
             schedule(); // 初始展开，2 秒内无交互则自动收起
         }
