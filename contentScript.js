@@ -490,7 +490,12 @@
                 while (cursor < list.length) {
                     const i = cursor++;
                     try { results[i] = await fn(list[i]); }
-                    catch (e) { results[i] = undefined; } // 任务自身负责记录失败，这里只保证池子不停摆
+                    catch (e) {
+                        // 任务自身负责记录失败，这里只保证池子不停摆；
+                        // 但异常不能无声消失，否则「池子里漏掉的任务」无从排查
+                        console.warn("[ExHentai Help] 并发任务异常（序号 " + i + "）:", errText(e));
+                        results[i] = undefined;
+                    }
                 }
             };
             const pool = [];
@@ -733,7 +738,7 @@
         }
         _iconUrl() {
             try { if (chrome.runtime && chrome.runtime.getURL) return chrome.runtime.getURL("icons/icon_128.png"); }
-            catch (e) { /* 非扩展环境回落相对路径 */ }
+            catch (e) { console.warn("[ExHentai Help] 取扩展图标地址失败，回落相对路径:", errText(e)); }
             return "icons/icon_128.png";
         }
         // 最小化状态完全由本模块内部维护
@@ -908,7 +913,11 @@
                 }
                 this.status = "pending";
                 if (msg) msg.textContent = i18n.t("loadMore");
-            } catch (e) { this.status = "error"; if (msg) msg.textContent = i18n.t("loadFail"); }
+            } catch (e) {
+                this.status = "error";
+                console.warn("[ExHentai Help] 加载下一页失败:", errText(e), next || "");
+                if (msg) msg.textContent = i18n.t("loadFail");
+            }
         }
         _home() {
             this._paginate({
@@ -964,7 +973,11 @@
                     if (!this.previewStyleInserted) { const s = document.createElement("style"); s.textContent = "#i3 > div {color:#222;}"; document.head.appendChild(s); this.previewStyleInserted = true; }
                     this.status = st.next ? "pending" : "non";
                     if (msg) msg.textContent = st.next ? i18n.t("pageOf", { cur: st.cur, tot: st.tot || "?" }) : i18n.t("pageAll", { tot: st.tot || st.cur });
-                } catch (e) { this.status = "error"; if (msg) msg.textContent = i18n.t("loadFail"); }
+                } catch (e) {
+                    this.status = "error";
+                    console.warn("[ExHentai Help] 加载大图下一页失败:", errText(e), st.next || "");
+                    if (msg) msg.textContent = i18n.t("loadFail");
+                }
             })();
         }
         _validNext(next, cur) {
@@ -1180,7 +1193,11 @@
             const nRetry = list.filter((f) => f.retryable !== false).length;
             const rb = Dom.el("button", "eh-btn eh-dl-abort eh-report-retry", `${i18n.t("retryAllFailed")} (${nRetry})`);
             rb.disabled = nRetry === 0;
-            rb.onclick = () => onRetry();
+            // 重试是异步的，漏掉 catch 会变成「点了按钮没反应」的未处理 rejection
+            rb.onclick = () => {
+                const p = onRetry();
+                if (p && typeof p.catch === "function") p.catch((e) => toast(errText(e)));
+            };
             wrap.appendChild(rb);
         }
         modal.appendContent(wrap);
@@ -1203,7 +1220,9 @@
             for (const f of todo) {
                 if (ctrl.status === "aborted") break;
                 let ok = false;
-                try { ok = await retryOne(f); } catch (e) { ok = false; }
+                // 重试单项的异常不能只记成败：否则「重试一直失败」没有任何可排查线索
+                try { ok = await retryOne(f); }
+                catch (e) { ok = false; console.warn("[ExHentai Help] 重试单项异常:", errText(e), f && f.name); }
                 // 必须严格判 true：retryOne 还可能返回 DIR_SKIP（目录不可用）等真值对象
                 if (ok === true) { const i = list.indexOf(f); if (i >= 0) list.splice(i, 1); }
             }
@@ -1387,7 +1406,7 @@
         await Speed.runWithConcurrency(links.map((link, index) => ({ link, index })), Settings.get("concurrency"), async (t) => {
             let r = false;
             try { r = await withDirGate(subpath, () => downloadSingleImage(t.link, t.index, padLen, opts, ctrl, modal, subpath), onDirPoison); }
-            catch (e) { r = false; }
+            catch (e) { r = false; console.warn("[ExHentai Help] 图片下载任务异常:", errText(e), t.link); }
             // 目标目录不可用：统一提示已在日志里；这里仍计入失败列表，
             // 否则「失败 0 → 全部下载完成」会和「其实只下了 1 张」自相矛盾，而且重试按钮必须存在
             if (r === DIR_SKIP) {
@@ -1419,7 +1438,8 @@
             if (!a) return;
             const href = a.getAttribute("href");
             let url = a.href;
-            try { if (baseUrl) url = new URL(href || a.href, baseUrl).href; } catch (e) { /* 保持原值 */ }
+            try { if (baseUrl) url = new URL(href || a.href, baseUrl).href; }
+            catch (e) { console.warn("[ExHentai Help] 种子地址补全失败，保持原值:", errText(e), href || ""); }
             const name = (a.textContent || "").trim().replace(/[\\/:*?"<>|]/g, "_") || "torrent";
             const fileName = name.slice(0, 120) + ".torrent";
             if (!fallback) fallback = { date: 0, torrentUrl: url, fileName };
@@ -1831,7 +1851,9 @@
     }
 
     async function boot() {
-        try { await Settings.load(); } catch (e) { /* 已回落默认值 */ }
+        // Settings.load 内部已兜底回落默认值；这里再记一条，便于发现「设置一直读不出来」
+        try { await Settings.load(); }
+        catch (e) { console.warn("[ExHentai Help] 读取设置失败，本次使用默认值:", errText(e)); }
         safeInit("控制面板", () => ControlPanel.init());
         safeInit("自动翻页", () => AutoPager.init());
         safeInit("画廊图片按钮", () => { if (document.querySelector("#gdt")) injectGalleryImageButton(); });
