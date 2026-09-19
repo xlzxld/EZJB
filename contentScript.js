@@ -553,14 +553,23 @@
 
             // 瀑布流 append（限 200 条防 DOM 膨胀）+ 视口底部约束
             const LOG_MAX = 200;
-            const clampToViewport = () => {
+            // 弹窗高度随日志增长：若每次 append 都同步读 offsetHeight，会被迫触发一次同步布局。
+            // 批量下载动辄几百条日志 = 几百次 reflow。合并到下一帧执行，视觉结果完全一致。
+            let clampRaf = 0;
+            const clampNow = () => {
                 if (!body.style.top) return; // 等初始居中定位后再约束
+                if (!document.contains(body)) return; // 弹窗已关闭
                 const maxTop = Math.max(4, window.innerHeight - body.offsetHeight - 4);
                 const curTop = parseFloat(body.style.top);
                 if (!isNaN(curTop)) {
                     if (curTop > maxTop) body.style.top = maxTop + "px";
                     if (curTop < 4) body.style.top = "4px";
                 }
+            };
+            const clampToViewport = () => {
+                if (typeof requestAnimationFrame !== "function") { clampNow(); return; }
+                if (clampRaf) return;
+                clampRaf = requestAnimationFrame(() => { clampRaf = 0; clampNow(); });
             };
             content.appendContent = (...nodes) => {
                 const atBottom = content.scrollHeight - content.clientHeight <= content.scrollTop + 20;
