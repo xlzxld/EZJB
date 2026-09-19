@@ -352,6 +352,9 @@
        background 只瞬时派发下载拿 downloadId（不等完成），
        content 侧轮询 chrome.downloads.search 查状态——每次查询都是瞬时操作，
        SW 即使在两次轮询间被回收，下次查询也会自动唤醒。 */
+    const DOWNLOAD_TIMEOUT_MS = 180000; // 单文件整体超时
+    const DOWNLOAD_POLL_MS = 800;       // 轮询间隔（每条消息都会唤醒一次 SW，勿调过小）
+    const QUERY_ERR_MAX = 5;            // 连续查不到状态的容忍次数
     // Chrome 在判定目标路径不可写时，会把文件静默回落到默认下载目录
     // （Chromium DownloadPathReservationTracker：requested_target_path 不可写 → 换父目录）。
     // 因此下载完成后必须核对真实落盘路径是否仍在目标子目录内。
@@ -375,9 +378,9 @@
         if (typeof id !== "number" || !isFinite(id)) return { success: false, error: i18n.t("dispatchNoId") };
         const start = Date.now();
         let queryErrors = 0;
-        while (Date.now() - start < 180000) { // 3 分钟超时
+        while (Date.now() - start < DOWNLOAD_TIMEOUT_MS) { // 3 分钟超时
             if (ctrl && ctrl.status === "aborted") return { success: false, error: i18n.t("taskAborted") };
-            await Dom.sleep(800);
+            await Dom.sleep(DOWNLOAD_POLL_MS);
             if (ctrl && ctrl.status === "aborted") return { success: false, error: i18n.t("taskAborted") };
             const st = await sendMsg("DOWNLOAD_QUERY", { id }, 8000);
             if (st && st.state) {
@@ -388,7 +391,7 @@
                     return misplaced ? { success: true, misplaced } : { success: true };
                 }
                 if (st.state === "interrupted") return { success: false, error: st.error || i18n.t("downloadInterrupted") };
-            } else if (++queryErrors >= 5) {
+            } else if (++queryErrors >= QUERY_ERR_MAX) {
                 // 连续 5 次查不到状态（SW 始终不可用）→ 提前放弃，结果与原逻辑（等到 3 分钟超时）一致
                 return { success: false, error: i18n.t("downloadTimeout") };
             }
